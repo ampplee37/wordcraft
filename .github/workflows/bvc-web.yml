@@ -1,0 +1,78 @@
+name: BVC web build
+
+# The browser build with the `wordcraft:control` host message (apps/wordcraft-web/src/host.rs), published
+# as a release of this fork for the BV Collective dashboard, which pins it by version and SHA-256
+# (ampplee37/project-create: scripts/fetch_wordcraft_web.py). The recipe is the suite's own release job
+# (storytold/craft-common-actions, `web`): stable Rust with the wasm32 target, trunk 0.21.14, the pinned
+# craft-fonts and craft-i18n checkouts, then packaging/web/package.sh.
+
+on:
+  push:
+    branches: [studio-bridge]
+    paths: ["apps/wordcraft-web/**", ".github/workflows/bvc-web.yml"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version for the zip's name, e.g. 0.11.0-bvc.1"
+        type: string
+        default: "0.11.0-bvc.1"
+      release:
+        description: "Publish the zip as release v<version> of this fork"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bvc-web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web (wasm)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 0
+      RUST_BACKTRACE: 1
+      WORDCRAFT_VERSION: ${{ inputs.version || '0.11.0-bvc.1' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: bvc-web
+      - uses: storytold/craft-common-actions/actions/install-trunk@main
+        with:
+          trunk-version: "0.21.14"
+      - name: Check out craft-fonts
+        uses: storytold/craft-common-actions/actions/checkout-craft-fonts@main
+        with:
+          ref: bfcbf714e45a3ea8e98f88ab2b7971372a576414
+      - name: Check out craft-i18n
+        uses: storytold/craft-common-actions/actions/checkout-craft-i18n@main
+      - name: Build and zip
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+          CRAFT_FONTS_REQUIRED: "1"
+        run: packaging/web/package.sh
+      - name: Checksum
+        run: cd dist/release && sha256sum wordcraft-web-*.zip | tee SHA256SUMS.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wordcraft-web-${{ env.WORDCRAFT_VERSION }}
+          path: dist/release/*
+          if-no-files-found: error
+      - name: Publish the release
+        if: inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${WORDCRAFT_VERSION}" dist/release/wordcraft-web-*.zip dist/release/SHA256SUMS.txt \
+            --target "${GITHUB_SHA}" --title "WordCraft web ${WORDCRAFT_VERSION} (BVC)" \
+            --notes "WordCraft ${WORDCRAFT_VERSION%-bvc.*} web build with the wordcraft:control host message for the BV Collective dashboard. Source: the studio-bridge branch of this fork."

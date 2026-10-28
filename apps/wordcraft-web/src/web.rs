@@ -69,10 +69,12 @@ pub fn start() {
                     session.system_region = region;
                     let messages = Rc::new(RefCell::new(Vec::new()));
                     let mut services = services(inbox.clone(), cc.egui_ctx.clone(), dirty, saves.clone(), messages.clone());
-                    if let Some(bridge) = &app_bridge {
-                        bridge.connect(&mut services, inbox.clone(), cc.egui_ctx.clone());
-                    }
+                    let control = app_bridge.as_ref().map(|bridge| bridge.connect(&mut services, inbox.clone(), cc.egui_ctx.clone()));
                     let mut app = WordApp::new(session, services);
+                    // The parent's `wordcraft:control` requests, answered like the desktop app's control port.
+                    if let Some(control) = control {
+                        app = app.with_control(control);
+                    }
                     // Pasted pictures wait apart from dropped files: the app inserts one only when the page is the edit target (#1349).
                     app.services.pasted = Some(pasted);
                     app.autosave = false;
